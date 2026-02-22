@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
-import type { MatchResult, AnkenResult, ExcludedAnken } from "@/lib/matching";
+import type { MatchResult, AnkenResult, ExcludedAnken, ConditionBadge } from "@/lib/matching";
 
 type PriceType = "hourly" | "monthly";
 
@@ -136,6 +136,12 @@ export default function HomePage() {
     if (score >= 70) return "高マッチ";
     if (score >= 50) return "中マッチ";
     return "参考";
+  };
+
+  const badgeStyle = (status: ConditionBadge["status"]) => {
+    if (status === "match") return "bg-green-50 text-green-700 border-green-200";
+    if (status === "warn") return "bg-amber-50 text-amber-700 border-amber-200";
+    return "bg-gray-50 text-gray-500 border-gray-200";
   };
 
   return (
@@ -417,26 +423,19 @@ export default function HomePage() {
                             </div>
                           </div>
 
-                          {/* マッチ理由バッジ */}
-                          {anken.matchReason && (
-                            <div className="mt-1.5">
-                              <span className="inline-block text-xs px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full border border-blue-100">
-                                {anken.matchReason}
-                              </span>
+                          {/* 条件一致バッジ */}
+                          {anken.conditionBadges && anken.conditionBadges.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {anken.conditionBadges.map((badge, i) => (
+                                <span
+                                  key={i}
+                                  className={`inline-block text-xs px-2 py-0.5 rounded-full border font-medium ${badgeStyle(badge.status)}`}
+                                >
+                                  {badge.label}
+                                </span>
+                              ))}
                             </div>
                           )}
-
-                          {/* 単価・勤務地 */}
-                          <div className="mt-2 flex flex-wrap gap-2 text-xs text-gray-500">
-                            {anken.extractedPrice != null && (
-                              <span className="flex items-center gap-1">
-                                💴 {anken.extractedPrice.toLocaleString()}円/{anken.extractedPriceType === "hourly" ? "時" : "月"}
-                              </span>
-                            )}
-                            {anken.extractedLocation && (
-                              <span className="flex items-center gap-1">📍 {anken.extractedLocation}</span>
-                            )}
-                          </div>
 
                           {/* 警告 */}
                           {anken.warningMessages.length > 0 && (

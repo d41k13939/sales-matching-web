@@ -31,6 +31,13 @@ export type WarningType =
   | "price_unknown"
   | "must_relaxed";
 
+export type BadgeStatus = "match" | "warn" | "info";
+
+export interface ConditionBadge {
+  label: string;       // 表示テキスト（例: "単価2,400円/時", "フルリモート", "PC貸与"）
+  status: BadgeStatus; // match=緑, warn=黄, info=グレー
+}
+
 export interface AnkenResult {
   id: string;
   name: string;
@@ -43,6 +50,7 @@ export interface AnkenResult {
   extractedPrice?: number;
   matchReason?: string;
   matchReasonDetail?: string;
+  conditionBadges?: ConditionBadge[]; // 条件一致バッジ（カード表示用）
 }
 
 export interface ExcludedAnken {
@@ -365,6 +373,7 @@ function parseWorkHours(workHours: string): number | null {
 
 // ===== 備考評価 =====
 
+// 固定キーワードトピック（後方互換）
 const REMARKS_TOPICS = {
   ng: [
     { keyword: "PC持参不可", pattern: /PC.*持参|自前.*PC|自己.*PC/ },
@@ -380,19 +389,69 @@ const REMARKS_TOPICS = {
   ],
 };
 
-function evaluateRemarks(remarks: string | undefined, ankenText: string) {
-  if (!remarks) return { score: 0, ngMatched: [] as string[], positiveMatched: [] as string[] };
+/**
+ * 備考欄フリーテキストをトークン分割して案件本文と照合する
+ * 例: "PC貸与 フルリモート" → ["PC貸与", "フルリモート"] を個別に照合
+ */
+function parseRemarksTokens(remarks: string): string[] {
+  // 句読点・改行・スラッシュ・スペースで分割し、2文字以上のトークンを返す
+  return remarks
+    .split(/[\s\u3000、。・/／,，\n]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2);
+}
+
+/**
+ * トークンに対して案件本文内の類義語パターンを返す
+ * 「PC貸与」→ /PC.*貸与|PC.*支給|PC.*貸出|パソコン.*貸与|PC.*あり/ のように拡張
+ */
+const REMARKS_SYNONYM_MAP: Array<{ tokens: RegExp; ankenPattern: RegExp; label: string }> = [
+  // PC関連
+  { tokens: /PC貸与|PC支給|パソコン貸与|PC貸出|PC.*あり/, ankenPattern: /PC.*貸与|PC.*支給|PC.*貸出|パソコン.*貸与|PC.*あり|PC.*提供|PC.*用意/, label: "PC貸与" },
+  { tokens: /PC持参|自前PC|自己PC|PC自前/, ankenPattern: /PC.*持参|自前.*PC|自己.*PC|PC.*自己/, label: "PC持参" },
+  // リモート関連
+  { tokens: /フルリモ|フルリモート|完全リモート/, ankenPattern: /フルリモ|フルリモート|完全リモート/, label: "フルリモート" },
+  { tokens: /週[1-3]日|週[1-3]回|週3以下/, ankenPattern: /週[1-3]日|週[1-3]回/, label: "週3日以下" },
+  // 勤務時間
+  { tokens: /土日休み|土日祝休み|完全週休2日/, ankenPattern: /土日祝|完全週休2日/, label: "土日休み" },
+  { tokens: /フレックス|フレキシブル/, ankenPattern: /フレックス|フレキシブル/, label: "フレックス" },
+  { tokens: /残業なし|残業少/, ankenPattern: /残業.*なし|残業.*少|残業.*ほぼ/, label: "残業なし" },
+  // 契約・条件
+  { tokens: /長期|長期案件|長期希望/, ankenPattern: /長期|1年以上|継続/, label: "長期案件" },
+  { tokens: /短期|短期案件/, ankenPattern: /短期|[1-3]ヶ月|[1-3]か月/, label: "短期案件" },
+  { tokens: /交通費|交通費支給/, ankenPattern: /交通費.*支給|交通費.*あり/, label: "交通費支給" },
+  // 商材・業種
+  { tokens: /SaaS/, ankenPattern: /SaaS/, label: "SaaS" },
+  { tokens: /高単価/, ankenPattern: /高単価|単価高/, label: "高単価" },
+  { tokens: /インサイドセールス|IS/, ankenPattern: /インサイドセールス|\bIS\b/, label: "IS" },
+  { tokens: /フィールドセールス|FS/, ankenPattern: /フィールドセールス|\bFS\b/, label: "FS" },
+];
+
+export interface RemarksMatchResult {
+  score: number;
+  ngMatched: string[];          // NG条件として一致したもの
+  positiveMatched: string[];    // ポジティブ条件として一致したもの
+  freeTextMatched: string[];    // フリーテキストで一致したもの
+  freeTextUnmatched: string[];  // フリーテキストで一致しなかったもの（要確認）
+}
+
+function evaluateRemarks(remarks: string | undefined, ankenText: string): RemarksMatchResult {
+  if (!remarks) return { score: 0, ngMatched: [], positiveMatched: [], freeTextMatched: [], freeTextUnmatched: [] };
 
   const ngMatched: string[] = [];
   const positiveMatched: string[] = [];
+  const freeTextMatched: string[] = [];
+  const freeTextUnmatched: string[] = [];
   let score = 0;
 
+  // 1. 固定NGキーワードチェック（既存ロジック）
   for (const topic of REMARKS_TOPICS.ng) {
     if (new RegExp(topic.keyword, "i").test(remarks) && topic.pattern.test(ankenText)) {
       ngMatched.push(topic.keyword);
     }
   }
 
+  // 2. 固定ポジティブキーワードチェック（既存ロジック）
   for (const topic of REMARKS_TOPICS.positive) {
     if (new RegExp(topic.keyword, "i").test(remarks) && topic.pattern.test(ankenText)) {
       positiveMatched.push(topic.keyword);
@@ -400,7 +459,40 @@ function evaluateRemarks(remarks: string | undefined, ankenText: string) {
     }
   }
 
-  return { score, ngMatched, positiveMatched };
+  // 3. フリーテキストのトークンを案件本文と照合
+  const tokens = parseRemarksTokens(remarks);
+  for (const token of tokens) {
+    // 固定キーワードで既に処理済みのものはスキップ
+    const alreadyHandled = [...positiveMatched, ...ngMatched].some((m) =>
+      m.includes(token) || token.includes(m)
+    );
+    if (alreadyHandled) continue;
+
+    // 類義語マップで照合
+    const synonym = REMARKS_SYNONYM_MAP.find((s) => s.tokens.test(token));
+    if (synonym) {
+      if (synonym.ankenPattern.test(ankenText)) {
+        freeTextMatched.push(synonym.label);
+        score += 8;
+      } else {
+        freeTextUnmatched.push(synonym.label);
+      }
+      continue;
+    }
+
+    // 類義語マップにない場合は直接テキスト照合（部分一致）
+    const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const directPattern = new RegExp(escapedToken, "i");
+    if (directPattern.test(ankenText)) {
+      freeTextMatched.push(token);
+      score += 5;
+    } else {
+      // 一致しなかった条件は「要確認」として記録
+      freeTextUnmatched.push(token);
+    }
+  }
+
+  return { score, ngMatched, positiveMatched, freeTextMatched, freeTextUnmatched };
 }
 
 // ===== キーワード辞書 =====
@@ -610,9 +702,17 @@ function matchAnken(
       }
     }
 
-    if (remarksResult.positiveMatched.length > 0) {
-      matchReasonParts.push(remarksResult.positiveMatched[0]);
-      matchReasonDetailParts.push(`✅ 希望条件: ${remarksResult.positiveMatched.join("、")}`);
+    // 備考条件の一致・未一致を表示
+    const allRemarksMatched = [...remarksResult.positiveMatched, ...remarksResult.freeTextMatched];
+    const allRemarksUnmatched = remarksResult.freeTextUnmatched;
+
+    if (allRemarksMatched.length > 0) {
+      // カードには最初の1〜2件を表示
+      matchReasonParts.push(allRemarksMatched.slice(0, 2).join("・"));
+      matchReasonDetailParts.push(`✅ 希望条件: ${allRemarksMatched.join("、")}`);
+    }
+    if (allRemarksUnmatched.length > 0) {
+      matchReasonDetailParts.push(`⚠️ 要確認: ${allRemarksUnmatched.join("、")}（案件本文に記載が見つかりませんでした）`);
     }
 
     if (score < 40) {
@@ -622,6 +722,42 @@ function matchAnken(
     const matchReason = matchReasonParts.length > 0
       ? matchReasonParts.join("・")
       : score >= 70 ? "条件に適合しています" : score >= 40 ? "部分的にマッチしています" : "参考情報として表示";
+
+    // 条件一致バッジを生成
+    const conditionBadges: ConditionBadge[] = [];
+
+    // 単価バッジ
+    if (extractedPrice != null) {
+      const unit = extractedPriceType === "hourly" ? "円/時" : "円/月";
+      const priceLabel = `${extractedPrice.toLocaleString()}${unit}`;
+      if (condition.minPrice && extractedPriceType === condition.priceType) {
+        conditionBadges.push({ label: `💴 ${priceLabel}`, status: "match" });
+      } else {
+        conditionBadges.push({ label: `💴 ${priceLabel}`, status: "info" });
+      }
+    } else if (condition.minPrice) {
+      conditionBadges.push({ label: "💴 単価不明", status: "warn" });
+    }
+
+    // 勤務地バッジ
+    if (locationResult.match === "remote") {
+      conditionBadges.push({ label: "🏠 フルリモート", status: "match" });
+    } else if (locationResult.match === "exact" && extractedLocation) {
+      conditionBadges.push({ label: `📍 ${extractedLocation.substring(0, 12)}`, status: "match" });
+    } else if (locationResult.match === "warning") {
+      conditionBadges.push({ label: `📍 ${extractedLocation ?? "勤務地要確認"}`, status: "warn" });
+    } else if (extractedLocation) {
+      conditionBadges.push({ label: `📍 ${extractedLocation.substring(0, 12)}`, status: "info" });
+    }
+
+    // 備考条件バッジ（一致したもの）
+    for (const kw of allRemarksMatched.slice(0, 3)) {
+      conditionBadges.push({ label: `✓ ${kw}`, status: "match" });
+    }
+    // 備考条件バッジ（未一致のもの）
+    for (const kw of allRemarksUnmatched.slice(0, 2)) {
+      conditionBadges.push({ label: `? ${kw}`, status: "warn" });
+    }
 
     matched.push({
       id: anken.id,
@@ -635,6 +771,7 @@ function matchAnken(
       extractedPrice: extractedPrice ?? undefined,
       matchReason,
       matchReasonDetail: matchReasonDetailParts.length > 0 ? matchReasonDetailParts.join("\n") : undefined,
+      conditionBadges,
     });
   }
 

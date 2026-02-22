@@ -406,8 +406,8 @@ function parseRemarksTokens(remarks: string): string[] {
  * 「PC貸与」→ /PC.*貸与|PC.*支給|PC.*貸出|パソコン.*貸与|PC.*あり/ のように拡張
  */
 const REMARKS_SYNONYM_MAP: Array<{ tokens: RegExp; ankenPattern: RegExp; label: string }> = [
-  // PC関連
-  { tokens: /PC貸与|PC支給|パソコン貸与|PC貸出|PC.*あり/, ankenPattern: /PC.*貸与|PC.*支給|PC.*貸出|パソコン.*貸与|PC.*あり|PC.*提供|PC.*用意/, label: "PC貸与" },
+  // PC関連（明示的な貸与記載のみ一致。「なし」「不可」等が後続する場合は除外）
+  { tokens: /PC貸与|PC支給|パソコン貸与|PC貸出/, ankenPattern: /PC貸与(?!なし|不可|無し)|PC支給(?!なし|不可)|パソコン貸与(?!なし)|貸与あり|貸与：あり|PC提供(?!なし)|PC用意(?!なし)/, label: "PC貸与" },
   { tokens: /PC持参|自前PC|自己PC|PC自前/, ankenPattern: /PC.*持参|自前.*PC|自己.*PC|PC.*自己/, label: "PC持参" },
   // リモート関連
   { tokens: /フルリモ|フルリモート|完全リモート/, ankenPattern: /フルリモ|フルリモート|完全リモート/, label: "フルリモート" },

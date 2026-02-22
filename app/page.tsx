@@ -85,6 +85,15 @@ export default function HomePage() {
     }
   };
 
+  // fullTextの先頭にnameが重複している場合はnameを付加しない
+  const buildFullText = (name: string, fullText: string): string => {
+    const trimmedFull = fullText.trim();
+    const trimmedName = name.trim();
+    // fullTextがnameで始まる場合はfullTextをそのまま使う
+    if (trimmedFull.startsWith(trimmedName)) return trimmedFull;
+    return `${trimmedName}\n${trimmedFull}`;
+  };
+
   const copyToClipboard = useCallback(async (text: string, label: string) => {
     try {
       await navigator.clipboard.writeText(text);
@@ -110,7 +119,7 @@ export default function HomePage() {
       const text = items.map((a) => a.name).join("\n");
       await copyToClipboard(text, `案件名 ${items.length}件`);
     } else {
-      const text = items.map((a) => `${a.name}\n${a.fullText}`).join("\n\n---\n\n");
+      const text = items.map((a) => buildFullText(a.name, a.fullText)).join("\n\n---\n\n");
       await copyToClipboard(text, `案件全文 ${items.length}件`);
     }
     setSelectMode(null);
@@ -406,12 +415,16 @@ export default function HomePage() {
                 {result.matched.map((anken) => (
                   <div
                     key={anken.id}
-                    className={`bg-white rounded-xl border transition-all cursor-pointer ${
+                    className={`rounded-xl border transition-all cursor-pointer ${
                       selectMode
                         ? selectedIds.has(anken.id)
-                          ? "border-blue-500 ring-2 ring-blue-200"
-                          : "border-gray-200 hover:border-blue-300"
-                        : "border-gray-200 hover:border-blue-300 hover:shadow-sm"
+                          ? "border-blue-500 ring-2 ring-blue-200 bg-white"
+                          : anken.score >= 70
+                            ? "border-emerald-200 bg-emerald-50 hover:border-emerald-400"
+                            : "border-gray-200 bg-white hover:border-blue-300"
+                        : anken.score >= 70
+                          ? "border-emerald-200 bg-emerald-50 hover:border-emerald-400 hover:shadow-sm"
+                          : "border-gray-200 bg-white hover:border-blue-300 hover:shadow-sm"
                     }`}
                     onClick={() => {
                       if (selectMode) toggleSelect(anken.id);
@@ -532,7 +545,7 @@ export default function HomePage() {
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
                 <button
-                  onClick={() => copyToClipboard(`${selectedAnken.name}\n${selectedAnken.fullText}`, "全文")}
+                  onClick={() => copyToClipboard(buildFullText(selectedAnken.name, selectedAnken.fullText), "全文")}
                   className="px-3 py-1.5 bg-green-50 hover:bg-green-100 text-green-700 text-sm font-medium rounded-lg border border-green-200 transition-colors whitespace-nowrap"
                 >📄 全文をコピー</button>
                 <button

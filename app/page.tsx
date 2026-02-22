@@ -150,12 +150,22 @@ export default function HomePage() {
       <header className="bg-white border-b border-gray-200 sticky top-0 z-10 shadow-sm">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center gap-3">
           <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">案</div>
-          <h1 className="text-lg font-bold text-gray-900">案件マッチング</h1>
-          {result && (
-            <span className="ml-auto text-sm text-gray-500">
-              {result.totalCount}件マッチ / {result.excluded.length}件除外
-            </span>
-          )}
+          <h1 className="text-lg font-bold text-gray-900">株式会社Salesaurus 案件選定🦖</h1>
+          <div className="ml-auto flex items-center gap-3">
+            {result && (
+              <span className="text-sm text-gray-500">
+                {result.totalCount}件マッチ / {result.excluded.length}件除外
+              </span>
+            )}
+            <a
+              href="/manual"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm font-medium px-3 py-1.5 rounded-lg transition-colors border border-gray-200"
+            >
+              📖 使い方
+            </a>
+          </div>
         </div>
       </header>
 
@@ -301,6 +311,20 @@ export default function HomePage() {
                 </>
               ) : "🔍 案件を検索"}
             </button>
+
+            {/* スキルシート利用時のAPI料金注意書き */}
+            {skillFile && (
+              <div className="mt-3 bg-amber-50 border border-amber-200 rounded-xl p-3">
+                <p className="text-xs text-amber-700 leading-relaxed">
+                  <span className="font-bold">⚠️ ご協力のお願い：</span>スキルシートを使った検索はAI解析のため弊社にAPI利用料が発生します。弊社都合で大変恐縮ですが、本当に必要なときだけご利用いただけますと大変助かります🙏
+                </p>
+              </div>
+            )}
+            {!skillFile && (
+              <p className="mt-2 text-xs text-center text-gray-400">
+                ※ スキルシートを使った検索は弊社にAPI料金が発生します。<br />必要なときだけご利用いただけますと幸いです🙏
+              </p>
+            )}
           </div>
         </aside>
 
